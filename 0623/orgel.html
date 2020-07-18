@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>円盤オルゴール</title>
+<script>
+// const audioContext = new AudioContext();
+const audioContext = new AudioContext();
+let compressorNode, gainNode;
+let canvas, context, canvasRect;
+let pins = new Array();
+let angle = 0, timer = null;
+
+const init = () => {
+    // キャンバスの取得
+    canvas = document.getElementById("disc");
+    context = canvas.getContext("2d");
+    canvasRect = canvas.getBoundingClientRect();
+    // DynamicsCompressorノード、Gainノードの作成
+    compressorNode = audioContext.createDynamicsCompressor();
+    gainNode = audioContext.createGain();
+    setVolume();
+    // ノードの接続
+    compressorNode.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    // 円盤の描画
+    drawDisc();
+}
+
+const drawDisc = () => {
+    // 円盤の描画
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.save();
+    context.translate(300, 300);
+    context.rotate(-1 * angle);
+    // 音階（0-17:A6-D8)
+    const keys = [1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1];
+    for (let i = 0; i < 18; i++) {
+        let color = "#999999";
+        if (keys[i] == 1) color = "#6666CC";
+        drawCircle(0, 0, i*15+30, color);
+    }
+    // タイミング(0-31)
+    for (let i = 0; i < 32; i++) {
+        const x = 285 * Math.cos(i/16*Math.PI);
+        const y = 285 * Math.sin(i/16*Math.PI);
+        drawLine(0, 0, x, y, "#999999");
+    }
+    // ピン
+    for (const pin of pins) {
+        const [d, a] = [pin.note*15+30, pin.angle/16*Math.PI];
+        const x = d * Math.cos(a);
+        const y = d * Math.sin(a);
+        if ((timer != null) && (Math.abs(a-angle) < 0.1)) {
+            drawCircle(x, y, 10, "#990000", "#FFCCCC");
+            // 音の再生
+            if (pin.play == "off") {
+                play(pin.note);
+                pin.play = "on";
+            }
+        } else {
+            pin.play = "off";
+            drawCircle(x, y, 5, "#006600", "#00CC00");
+        }
+    }
+    context.restore();
+    // 再生位置
+    drawLine(300, 300, 585, 300, "#0000FF");
+}
+
+const drawLine = (x1, y1, x2, y2, color) => {
+    // 線の描画
+    context.strokeStyle = color;
+    context.beginPath();
+    context.moveTo(x1, y1);
+    context.lineTo(x2, y2);
+    context.stroke();
+}
+
+const drawCircle = (x, y, r, color1, color2 = null) => {
+    // 円の描画
+    context.strokeStyle = color1;
+    context.fillStyle = color2;
+    context.beginPath();
+    context.arc(x, y, r, 0, Math.PI*2);
+    if (color2 != null) context.fill();
+    context.stroke();
+}
+
+const startPlay = () => {
+    // 再生開始
+    if (timer == null) timer = setInterval(rotateDisc, 100);
+}
+
+const rotateDisc = () => {
+    // 円盤の回転
+    drawDisc();
+    const speed = document.getElementById("speed").value;
+    angle += Math.PI/160 * speed;
+    if (angle > Math.PI*2) angle -= Math.PI*2;
+}
+
+const stopPlay = () => {
+    // 停止
+    clearInterval(timer);
+    [timer, angle] = [null, 0];
+    drawDisc();
+}
+
+const setPin = (event, op) => {
+    // ピンの位置を取得
+    event.preventDefault();
+    const dx = 300 - (event.clientX - canvasRect.left);
+    const dy = 300 - (event.clientY - canvasRect.top);
+    const pNote = Math.round((Math.hypot(dx,dy) - 30)/15);
+    let pAngle = Math.round(Math.atan2(dy, dx) * 16 / Math.PI) + 16;
+    if (pAngle == 32) pAngle = 0;
+    // ピンの検索
+    let index = -1;
+    for (let i = 0; i < pins.length; i++) {
+        if ((pins[i].note == pNote) && (pins[i].angle == pAngle)) index = i;
+    }
+    if (timer == null) {
+        if ((op == "add") && (index == -1) && (pNote >= 0) && (pNote < 18)) {
+            // ピンの追加
+            pins.push({"note":pNote, "angle":pAngle, "play":"off"});
+            play(pNote);
+        } else if ((op == "remove") && (index > -1)) {
+            // ピンの削除
+            pins.splice(index, 1);
+        }
+        drawDisc();
+    }
+}
+
+const play = note => {
+    // Oscillatorノードの作成
+    const currentTime = audioContext.currentTime;
+    const oscillatorNode = audioContext.createOscillator();
+    const f = 440 * 2 ** ((note+24) / 12);
+    oscillatorNode.frequency.setValueAtTime(f, currentTime);
+    // エンベロープ
+    const speed = document.getElementById("speed").value;
+    const envelope = audioContext.createGain();
+    envelope.gain.setValueAtTime(1, audioContext.currentTime);
+    envelope.gain.exponentialRampToValueAtTime(0.1, currentTime + 0.5/speed);
+    envelope.gain.exponentialRampToValueAtTime(0.01, currentTime + 1/speed);
+    oscillatorNode.connect(envelope);
+    envelope.connect(compressorNode);
+    // 再生
+    oscillatorNode.start(currentTime);
+    oscillatorNode.stop(currentTime + 1/speed);
+}
+
+const setVolume = () => {
+    // ボリュームを変更
+    const volume = document.getElementById("volume").value;
+    document.getElementById("volumeText").innerHTML = `[${volume}]`;
+    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+}
+
+const clearPins = () => {
+    // ピンのクリア
+    pins = [];
+    drawDisc();
+}
+</script>
+</head>
+<body onload="init()">
+<p>円盤オルゴール</p>
+<input type="button" value="クリア" onclick="clearPins()">
+<input type="button" value="再生" onclick="startPlay()">
+<input type="button" value="停止" onclick="stopPlay()">
+speed:<input type="range" id="speed" value="5" min="1" max="10">
+volume:<input type="range" id="volume" value="0.5" min="0" max="1" step="0.1"
+ onchange="setVolume()"><span id="volumeText">[0.5]</span>
+<hr>
+<canvas id="disc" width="600" height="600" onclick="setPin(event,'add')"
+ oncontextmenu="setPin(event,'remove')"></canvas>
+</body>
+</html>
